@@ -8,7 +8,7 @@ public class HomeController {
 
     @GetMapping("/")
     public String home() {
-        return "Welcome to My CI/CD Project!";
+        return "Welcome to My Automated CI/CD Project!";
     }
 
     @GetMapping("/health")
