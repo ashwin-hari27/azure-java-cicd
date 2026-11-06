@@ -1,14 +1,22 @@
-
-name: Java CI Pipeline
+name: Java CI/CD Pipeline (AWS EKS)
 
 on:
   push:
     branches:
       - main
-
   pull_request:
     branches:
       - main
+
+# Needed for GitHub -> AWS OIDC authentication (no long-lived AWS keys)
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+  EKS_CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }}
 
 jobs:
   build:
@@ -27,3 +35,51 @@ jobs:
 
       - name: Build and test application
         run: mvn -B clean verify
+
+  deploy:
+    # Only deploy from main (not on pull requests), and only if build + tests pass
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-eks
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push Docker image to ECR
+        id: image
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          IMAGE="$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          docker build --platform linux/amd64 -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "uri=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Configure kubectl for EKS
+        run: aws eks update-kubeconfig --name "$EKS_CLUSTER_NAME" --region "$AWS_REGION"
+
+      - name: Deploy to EKS
+        env:
+          IMAGE_URI: ${{ steps.image.outputs.uri }}
+        run: |
+          sed -i "s|IMAGE_PLACEHOLDER|$IMAGE_URI|" k8s/10-deployment.yaml
+          kubectl apply -f k8s/
+          kubectl rollout status deployment/cicd-demo -n cicd-demo --timeout=300s
+
+      - name: Show service endpoint
+        run: kubectl get service cicd-demo -n cicd-demo

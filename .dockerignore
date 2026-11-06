@@ -1,5 +1,11 @@
 .git
+.github
 .vscode
-.mvn
-src
-*.cmd
+.idea
+k8s
+docs
+target
+*.md
+*.log
+.env
+.env.*
