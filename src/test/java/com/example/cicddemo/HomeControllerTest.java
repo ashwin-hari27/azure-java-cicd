@@ -11,7 +11,7 @@ class HomeControllerTest {
     @Test
     void homeEndpointTest() {
         assertEquals(
-            "Welcome to My Automated CI/CD Project!",
+            "Welcome to My Automated CI/CD Project 2!",
             controller.home()
         );
     }
